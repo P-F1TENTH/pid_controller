@@ -3,7 +3,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped
 from vesc_msgs.msg import VescSetCommand
 from simple_pid import PID
-from your_custom_msgs_package.msg import Control  # Replace with your actual message type
+from control_interfaces.msg import Control
 
 class VESCPIDController(Node):
     def __init__(self):
@@ -15,10 +15,11 @@ class VESCPIDController(Node):
         self.last_position_x = None
         self.last_timestamp = None
         self.target_speed = 0.0  # This will be set based on the control command
+        self.steering_angle = 0.0  # This too
         
-        self.vesc_command_publisher = self.create_publisher(VescSetCommand, "commands/motor/current", 10)
+        self.vesc_command_publisher = self.create_publisher(Control, "commands/ctrl", 10)
         self.pose_subscription = self.create_subscription(PoseStamped, "optitrack/rigid_body_0", self.pose_callback, 10)
-        self.control_command_subscription = self.create_subscription(Control, "commands/ctrl", self.control_command_callback, 1)
+        self.control_command_subscription = self.create_subscription(Control, "mpc_control", self.control_command_callback, 1)
 
     def pose_callback(self, msg):
         current_timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9
@@ -35,13 +36,17 @@ class VESCPIDController(Node):
         self.last_timestamp = current_timestamp
 
     def control_command_callback(self, msg):
-        if msg.control_mode == Control.SPEED_MODE:
-            self.target_speed = msg.set_speed
-            self.get_logger().info(f"New target speed received: {msg.set_speed}")
+        self.target_speed = msg.set_speed
+        self.steering_angle = msg.steering_angle
+        self.get_logger().info(f"New target speed received: {msg.set_speed}")
 
     def send_motor_command(self, current):
-        command = VescSetCommand(current=current)
-        self.vesc_command_publisher.publish(command)
+        control = Control(
+                set_current=current,
+                steering_angle=self.steering_angle,
+                control_mode=Control.CURRENT_MODE,
+            )
+        self.vesc_command_publisher.publish(control)
         self.get_logger().info(f"Sent motor current command: {current}")
 
 def main(args=None):
