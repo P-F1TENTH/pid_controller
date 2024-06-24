@@ -1,71 +1,48 @@
 import rclpy
-from geometry_msgs.msg import PoseStamped
-from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.node import Node
+from geometry_msgs.msg import PoseStamped
+from vesc_msgs.msg import VescSetCommand
 from simple_pid import PID
-from vesc_msgs.msg import VescSetCommand, VescStateStamped
-
+from your_custom_msgs_package.msg import Control  # Replace with your actual message type
 
 class VESCPIDController(Node):
-    """Node for controlling the VESC using PID based on the pose from Optitrack."""
-
     def __init__(self):
         super().__init__("vesc_pid_controller")
-        self.declare_parameters(
-            namespace="",
-            parameters=[
-                ("kp", 1.0),
-                ("ki", 0.0),
-                ("kd", 0.0),
-                ("target_x", 0.0),
-                ("target_y", 0.0),
-            ],
-        )
-        self.pid_x = PID(
-            self.get_parameter("kp").value,
-            self.get_parameter("ki").value,
-            self.get_parameter("kd").value,
-            setpoint=self.get_parameter("target_x").value,
-        )
-        self.pid_y = PID(
-            self.get_parameter("kp").value,
-            self.get_parameter("ki").value,
-            self.get_parameter("kd").value,
-            setpoint=self.get_parameter("target_y").value,
-        )
-
-        self.vesc_command_publisher = self.create_publisher(
-            VescSetCommand, "commands/motor/speed", 10
-        )
-        self.pose_subscription = self.create_subscription(
-            PoseStamped, "optitrack/rigid_body_0", self.pose_callback, 10
-        )
-        self.vesc_state_subscription = self.create_subscription(
-            VescStateStamped, "vesc/core", self.vesc_state_callback, 10
-        )
+        self.declare_parameters(namespace="", parameters=[
+            ("kp", 3.0), ("ki", 1.0), ("kd", 1.0),
+        ])
+        self.pid = PID(self.get_parameter("kp").value, self.get_parameter("ki").value, self.get_parameter("kd").value)
+        self.last_position_x = None
+        self.last_timestamp = None
+        self.target_speed = 0.0  # This will be set based on the control command
+        
+        self.vesc_command_publisher = self.create_publisher(VescSetCommand, "commands/motor/speed", 10)
+        self.pose_subscription = self.create_subscription(PoseStamped, "optitrack/rigid_body_0", self.pose_callback, 10)
+        self.control_command_subscription = self.create_subscription(Control, "commands/ctrl", self.control_command_callback, 1)
 
     def pose_callback(self, msg):
-        """Handle new pose data."""
-        current_x = msg.pose.position.x
-        current_y = msg.pose.position.y
-        speed_command = self.pid_x(
-            current_x
-        )  # Assume control on x-axis only for simplicity
-        self.send_motor_command(speed_command)
-        self.get_logger().info(
-            f"Pose updated. Current X: {current_x}, Command Speed: {speed_command}"
-        )
+        current_timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9
+        if self.last_position_x is not None and self.last_timestamp is not None:
+            time_delta = current_timestamp - self.last_timestamp
+            current_speed = (msg.pose.position.x - self.last_position_x) / time_delta
+            self.pid.setpoint = self.target_speed
+            speed_error = self.target_speed - current_speed
+            control_output = self.pid(speed_error)
+            self.send_motor_command(control_output)
+            self.get_logger().info(f"Speed estimated: {current_speed}, Target Speed: {self.target_speed}, Control Output: {control_output}")
+        
+        self.last_position_x = msg.pose.position.x
+        self.last_timestamp = current_timestamp
 
-    def vesc_state_callback(self, msg):
-        """Handle new VESC state data."""
-        self.get_logger().info(f"VESC state updated. Current speed: {msg.state.speed}")
+    def control_command_callback(self, msg):
+        if msg.control_mode == Control.SPEED_MODE:
+            self.target_speed = msg.set_speed
+            self.get_logger().info(f"New target speed received: {msg.set_speed}")
 
     def send_motor_command(self, speed):
-        """Send motor speed command to the VESC."""
         command = VescSetCommand(command=speed)
         self.vesc_command_publisher.publish(command)
         self.get_logger().info(f"Sent motor command: {speed}")
-
 
 def main(args=None):
     rclpy.init(args=args)
@@ -74,6 +51,5 @@ def main(args=None):
     vesc_controller.destroy_node()
     rclpy.shutdown()
 
-
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()
