@@ -9,14 +9,14 @@ class VESCPIDController(Node):
     def __init__(self):
         super().__init__("vesc_pid_controller")
         self.declare_parameters(namespace="", parameters=[
-            ("kp", 3.0), ("ki", 1.0), ("kd", 1.0),
+            ("kp", 1.0), ("ki", 0.0), ("kd", 0.0),
         ])
         self.pid = PID(self.get_parameter("kp").value, self.get_parameter("ki").value, self.get_parameter("kd").value)
         self.last_position_x = None
         self.last_timestamp = None
         self.target_speed = 0.0  # This will be set based on the control command
         
-        self.vesc_command_publisher = self.create_publisher(VescSetCommand, "commands/motor/speed", 10)
+        self.vesc_command_publisher = self.create_publisher(VescSetCommand, "commands/motor/current", 10)
         self.pose_subscription = self.create_subscription(PoseStamped, "optitrack/rigid_body_0", self.pose_callback, 10)
         self.control_command_subscription = self.create_subscription(Control, "commands/ctrl", self.control_command_callback, 1)
 
@@ -39,10 +39,10 @@ class VESCPIDController(Node):
             self.target_speed = msg.set_speed
             self.get_logger().info(f"New target speed received: {msg.set_speed}")
 
-    def send_motor_command(self, speed):
-        command = VescSetCommand(command=speed)
+    def send_motor_command(self, current):
+        command = VescSetCommand(current=current)
         self.vesc_command_publisher.publish(command)
-        self.get_logger().info(f"Sent motor command: {speed}")
+        self.get_logger().info(f"Sent motor current command: {current}")
 
 def main(args=None):
     rclpy.init(args=args)
