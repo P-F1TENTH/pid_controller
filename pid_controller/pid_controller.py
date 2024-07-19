@@ -13,7 +13,7 @@ class VESCPIDController(Node):
 
         # declare PID parameters
         self.declare_parameters(namespace="", parameters=[
-            ("kp", 1.0), ("ki", 0.0), ("kd", 0.0),
+            ("kp", 50.0), ("ki", 0.0), ("kd", 0.0),
         ])
         self.pid = PID(self.get_parameter("kp").value, self.get_parameter("ki").value, self.get_parameter("kd").value)
         
@@ -42,7 +42,7 @@ class VESCPIDController(Node):
             pos_diff_y = msg.pose.position.y - self.last_position_y
 
             # calculate angle of car movement
-            speed_angle = atan2(pos_diff_x, pos_diff_y)
+            speed_angle = atan2(pos_diff_y, pos_diff_x)
 
             # get car orientation
             orientation = euler_from_quaternion([msg.pose.orientation.x,
@@ -57,12 +57,13 @@ class VESCPIDController(Node):
             speed = absolute_speed * cos(speed_angle - orientation)
 
             self.pid.setpoint = self.target_speed
-            speed_error = self.target_speed - speed
-            control_output = self.pid(speed_error)
+            control_output = self.pid(speed)
             self.send_motor_command(control_output)
-            self.get_logger().info(f"Speed estimated: {speed}")
+
             # self.get_logger().info(f"Sped angle: {speed_angle}")
             # self.get_logger().info(f"Orientation: {orientation}")
+            # self.get_logger().info(f"Control output: {control_output}")
+            # self.get_logger().info(f"Speed estimated: {speed}")
         
         self.last_position_x = msg.pose.position.x
         self.last_position_y = msg.pose.position.y
@@ -79,7 +80,7 @@ class VESCPIDController(Node):
                 steering_angle=self.steering_angle,
                 control_mode=Control.CURRENT_MODE,
             )
-        # self.vesc_command_publisher.publish(control)
+        self.vesc_command_publisher.publish(control)
         # self.get_logger().info(f"Sent motor current command: {current}")
 
 def main(args=None):
