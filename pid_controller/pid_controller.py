@@ -15,7 +15,7 @@ class VESCPIDController(Node):
 
         # declare PID parameters
         self.declare_parameters(namespace="", parameters=[
-            ("kp", 40.0), ("ki", 60.0), ("kd", 0.0),
+            ("kp", 40.0), ("ki", 0.0), ("kd", 0.0),
         ])
         self.pid = PID(self.get_parameter("kp").value, self.get_parameter("ki").value, self.get_parameter("kd").value)
         
@@ -25,15 +25,18 @@ class VESCPIDController(Node):
         self.last_timestamp = None
 
         self.speed_buffer = []
+        self.control_output = 0
 
         # variables read from mpc control
         self.target_speed = 0.0
-        self.steering_angle = 0.
+        self.steering_angle = 0.0
+        self.brake = 0.0,
+        self.mode = None
         
         # publishers and subscribers
         self.vesc_command_publisher = self.create_publisher(Control, "commands/ctrl", 10)
         self.pose_subscription = self.create_subscription(PoseStamped, "optitrack/rigid_body_0", self.pose_callback, 10)
-        self.control_command_subscription = self.create_subscription(Control, "mpc_control", self.control_command_callback, 1)
+        self.control_command_subscription = self.create_subscription(Control, "mpc/control", self.control_command_callback, 1)
 
         # topics for debugging
         # self.estimated_speed = self.create_publisher(Float32, "estimated_speed", 10)
@@ -73,8 +76,7 @@ class VESCPIDController(Node):
 
             # pid things
             self.pid.setpoint = self.target_speed
-            control_output = self.pid(speed)
-            self.send_motor_command(control_output)
+            self.control_output = self.pid(speed)
 
             # self.get_logger().info(f"Sped angle: {speed_angle}")
             # self.get_logger().info(f"Orientation: {orientation}")
@@ -90,13 +92,22 @@ class VESCPIDController(Node):
     def control_command_callback(self, msg):
         self.target_speed = msg.set_speed
         self.steering_angle = msg.steering_angle
+        self.brake = msg.set_brake
+
+        if msg.control_mode is Control.SPEED_MODE:
+            self.mode = Control.CURRENT_MODE
+        elif msg.control_mode is Control.BRAKE_MODE:
+            self.mode = Control.BRAKE_MODE
+        
+        self.send_motor_command()
         # self.get_logger().info(f"New target speed received: {msg.set_speed}")
 
-    def send_motor_command(self, current):
+    def send_motor_command(self):
         control = Control(
-                set_current=current,
+                set_current=self.control_output,
+                set_brake=self.brake,
                 steering_angle=self.steering_angle,
-                control_mode=Control.CURRENT_MODE,
+                control_mode=self.mode
             )
         self.vesc_command_publisher.publish(control)
         # self.get_logger().info(f"Sent motor current command: {current}")
