@@ -6,6 +6,8 @@ from control_interfaces.msg import Control
 from tf_transformations import euler_from_quaternion
 from math import sqrt, atan2, cos
 
+from std_msgs.msg import Float32
+
 
 class VESCPIDController(Node):
     def __init__(self):
@@ -13,7 +15,7 @@ class VESCPIDController(Node):
 
         # declare PID parameters
         self.declare_parameters(namespace="", parameters=[
-            ("kp", 50.0), ("ki", 0.0), ("kd", 0.0),
+            ("kp", 40.0), ("ki", 60.0), ("kd", 0.0),
         ])
         self.pid = PID(self.get_parameter("kp").value, self.get_parameter("ki").value, self.get_parameter("kd").value)
         
@@ -22,14 +24,21 @@ class VESCPIDController(Node):
         self.last_position_y = None
         self.last_timestamp = None
 
+        self.speed_buffer = []
+
         # variables read from mpc control
         self.target_speed = 0.0
-        self.steering_angle = 0.0
+        self.steering_angle = 0.
         
         # publishers and subscribers
         self.vesc_command_publisher = self.create_publisher(Control, "commands/ctrl", 10)
         self.pose_subscription = self.create_subscription(PoseStamped, "optitrack/rigid_body_0", self.pose_callback, 10)
         self.control_command_subscription = self.create_subscription(Control, "mpc_control", self.control_command_callback, 1)
+
+        # topics for debugging
+        # self.estimated_speed = self.create_publisher(Float32, "estimated_speed", 10)
+        # self.current = self.create_publisher(Float32, "current", 10)
+
 
     def pose_callback(self, msg):
         current_timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9
@@ -56,14 +65,23 @@ class VESCPIDController(Node):
             # calculate speed aligned with car orientation
             speed = absolute_speed * cos(speed_angle - orientation)
 
+            # store last 10 speed values in buffer
+            self.speed_buffer.append(speed)
+            if len(self.speed_buffer) > 10:
+                self.speed_buffer.pop(0)
+            speed = sorted(self.speed_buffer)[len(self.speed_buffer) // 2]
+
+            # pid things
             self.pid.setpoint = self.target_speed
             control_output = self.pid(speed)
             self.send_motor_command(control_output)
 
             # self.get_logger().info(f"Sped angle: {speed_angle}")
             # self.get_logger().info(f"Orientation: {orientation}")
-            # self.get_logger().info(f"Control output: {control_output}")
             # self.get_logger().info(f"Speed estimated: {speed}")
+            # self.estimated_speed.publish(Float32(data=speed))
+            # self.get_logger().info(f"Control output: {control_output}")
+            # self.current.publish(Float32(data=control_output))
         
         self.last_position_x = msg.pose.position.x
         self.last_position_y = msg.pose.position.y
